@@ -12,3 +12,4 @@ class AppConfig(BaseAppConfig):
 
     def ready(self):
         importlib.import_module("pinax.stripe.webhooks")
+        importlib.import_module("payments")

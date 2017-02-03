@@ -2,12 +2,11 @@ from __future__ import unicode_literals
 
 import decimal
 
+import payments
+import stripe
 from django.db import models
 from django.utils import timezone
 from django.utils.encoding import python_2_unicode_compatible
-
-import stripe
-
 from jsonfield.fields import JSONField
 
 from .conf import settings
@@ -34,6 +33,18 @@ class Plan(StripeObject):
     statement_descriptor = models.TextField(blank=True)
     trial_period_days = models.IntegerField(null=True)
     metadata = JSONField(null=True)
+
+    @property
+    def unlocks(self):
+        return int(self.metadata.get('unlock_count'), 0)
+
+    @property
+    def listings(self):
+        return int(self.metadata.get('listing_count'), 0)
+
+    @property
+    def boosted(self):
+        return True if self.metadata.get('boost_all') == 'yes' else False
 
     def __str__(self):
         return "{} ({}{})".format(self.name, CURRENCY_SYMBOLS.get(self.currency, ""), self.amount)
@@ -134,10 +145,72 @@ class Customer(StripeObject):
     def stripe_customer(self):
         return stripe.Customer.retrieve(self.stripe_id)
 
+    @property
+    def active_subscription(self):
+        """
+        Returns the Customer's first active Subscription.
+        """
+        return Subscription.objects.filter(
+            customer=self,
+            status='active'
+        ).first()
+
+    @property
+    def active_plan(self):
+        """
+        Returns the Plan associated with the Customer's first active
+        Subscription.
+        """
+        if self.active_subscription:
+            return self.active_subscription.plan
+
+    def get_credit(self, credit_type):
+        """
+        Returns a valid Credit, or None if the Customer does not have any.
+        """
+        if credit_type not in ['listing', 'unlock']:
+            raise Exception('Invalid credit_type. Valid types are: listing, unlock.')
+        return next(iter([
+            credit for credit in payments.models.Credit.objects.filter(
+                customer=self,
+                item_type=credit_type
+            ) if credit.is_valid
+        ]), None)
+
     def __str__(self):
         return str(self.user)
 
-
+# class Customer(models.Model):
+#     stripe_customer = None
+#     lister = None
+#     user = None
+#
+#     def subscribe(self, stripe_plan_id='Free'):
+#         pass
+#
+#     @property
+#     def subscription():
+#         pass
+#
+#     @property
+#     def stripe_customer():
+#         pass
+#
+#     @property
+#     def unlocks_remaining():
+#         return 0
+#
+#     @property
+#     def listings_remaining():
+#         return 0
+#
+#     @property
+#     def billing_period():
+#         return now(), now()
+#
+#     def __str__(self):
+#         return '<Customer: {0}>'.format(self.user.email)
+#
 class Card(StripeObject):
 
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
